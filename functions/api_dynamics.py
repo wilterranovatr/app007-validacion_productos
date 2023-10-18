@@ -1,23 +1,38 @@
 import requests, json
+import datetime
+import pandas as pd
 
 class ApiDynamics:
     
     #Definiendo variables
-    url =""
-    username=""
-    top=0
+    url = "https://mistr.operations.dynamics.com/"
     extracto=""
     transaccion=""
     msg_error=""
     lista_productos={}
     productos=""
     
-    #Inicializando 
-    def __init__(self, i_url,i_username,i_top=0):
-        self.url = i_url
-        self.username= i_username
-        self.top = i_top
+    ##
+    productsBarcode = None
+    categoryProducts = None
+    translationProducts = None
+    AllProducts = None
+    listProviders = None
+    listProductsSell = None
+    productsInactive = None
     
+    #Inicializando 
+    def __init__(self):
+        
+        ## 
+        self.productsBarcode = pd.read_json(json.dumps(self.getBarcodeProduct()))
+        self.categoryProducts = pd.read_json(json.dumps(self.getCategoryProduct()))
+        self.translationProducts = pd.read_json(json.dumps(self.getTraslationProduct()))
+        self.AllProducts = pd.read_json(json.dumps(self.getAllProducts()))
+        self.listProviders = pd.read_json(json.dumps(self.getListProvidersProducts()))
+        self.listProductsSell = pd.read_json(json.dumps(self.getProductsSell()))
+        self.productsInactive = pd.read_json(json.dumps(self.getAllProductsInactive()))
+        ##
     
     def get_Token(self):
         env = {
@@ -36,42 +51,18 @@ class ApiDynamics:
         else:
             return None
     
-    #region Obtener Trabajos por Lotes
-    def get_Trabajo_Lotes(self):
-        
-        #Definir url
-        path = f"{self.url}/data/BatchJobs"
-        
-        token = self.get_Token()
-        
-        #Queries
-        query = f"?$filter=ExecutingBy%20eq%20'{self.username}'&$select=JobDescription,Status&$orderby=StartDateTime%20desc&$top={str(self.top)}"
-        
-        #Headers
-        
-        headers = {
-            "Authorization": token,
-            "Content-Type": "application/json"
-        }
-        
-        path=path+query
-        print(path)
-        response = requests.get(path,headers=headers)
-        print(response.status_code)
-        if response.status_code == 200:
-            print(response.json())
-            return response.json()
-        
-    #endregion
-    #region ObtenerProductos
-    def get_Products_List(self):
+    #region Obtener Todos Productos Vendidos
+    def getProductsSell(self): 
         #Definir url
         path = f"{self.url}/data/RetailTransactionSalesLinesV2"
         
         token = self.get_Token()
         
+        #Date Now
+        fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d")
+        
         #Queries
-        query = f"?$filter=TransactionNumber eq '{self.transaccion}' &$select=ItemId,Unit"
+        query = f"?$count=true&$select=ItemId,Unit&$filter=TransactionDate eq {fecha_actual}"
         
         #Headers
         
@@ -83,20 +74,160 @@ class ApiDynamics:
         path=path+query
         response = requests.get(path,headers=headers)
         if response.status_code == 200:
-            return response.json()
+            temp1= response.json()
+            #
+            count = int(int(temp1["@odata.count"])/10000)
+            if count > 0 :
+                result= temp1["value"]
+                for i in range(count):
+                    query_update = f"{path}&$top=10000&$skip={int(i)+1}0000"
+                    response = requests.get(query_update,headers=headers)
+                    if response.status_code == 200:
+                        result.extend(response.json()["value"])
+                return result
+            else:
+                return temp1["value"]
     #endregion
-    #region ObtenerTransaccionesError
-    def get_Transaction_Error(self):
+    
+    ######
+    def verifyExistsBarCode(self):
+        df1 = self.AllProducts
+        df2 = self.productsBarcode
+        df3 = self.categoryProducts
+        #print(df2)
+        consult = df1[~df1['ItemNumber'].isin(df2['ItemNumber'])]
+        result = df1[df1['ItemNumber'].isin(consult['ItemNumber'])]
+        result_filter = result[~result["SearchName"].str.contains("BONI",na=False)]
+        result_filter_mayoristas = df3[df3["ProductCategoryHierarchyName"].str.contains("Catalogo Mayorista",na=False)]
+        result_filter_ventas = result_filter[result_filter["ItemNumber"].isin(df3["ProductNumber"]) & (df3["ProductCategoryHierarchyName"].str.contains("Catalogo Ventas",na=False))]
+        result_final = result_filter_ventas[~result_filter_ventas['ItemNumber'].isin(result_filter_mayoristas['ProductNumber'])]
+        x , y = result_final.shape
+
+        if x>0:
+            print("-- Total prod. codigo_barra encontrado:" ,x)
+            data = result_final[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+    
+    def verifyUnitSymbol(self):
+        df1 = self.AllProducts
+        inventory_filter_symbol = df1[(df1["InventoryUnitSymbol"]=="U") | (df1["InventoryUnitSymbol"]=="LTR") | (df1["InventoryUnitSymbol"]=="SA") | (df1["InventoryUnitSymbol"]=="KGM") | (df1["InventoryUnitSymbol"]=="UND") | (df1["PurchaseUnitSymbol"]=="U.") | (df1["PurchaseUnitSymbol"]=="LTR.") | (df1["PurchaseUnitSymbol"]=="SA.") | (df1["PurchaseUnitSymbol"]=="KGM.") | (df1["InventoryUnitSymbol"]=="UND.")]
+        x , y = inventory_filter_symbol.shape
+        
+        if x>0:
+            print("-- Total prod. con problemas en unidades de conversion encontrado:" ,x)
+            data = inventory_filter_symbol[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+    
+    def verifyCodeSunat(self):
+        df1 = self.AllProducts
+        codigo_sunat = pd.read_csv("./assets/codigo_sunat.csv")
+        consult = df1[~df1['DPCodProductSUNAT_PE'].isin(codigo_sunat['CODIGO PRODUCTO'])]
+        consult_2 = consult[~(consult["DPCodProductSUNAT_PE"].astype(str).str[6:] == "00")]
+        x,y = consult_2.shape
+        if x>0:
+            print("-- Total prod. sunat encontrado:" ,x)
+            data = consult_2[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+    
+    def verifyAssignProvider(self):
+        df1= self.AllProducts
+        df2 = self.listProviders
+        result  = df1[~df1['ItemNumber'].isin(df2['ItemNumber'])]
+        #print(result) ##Esperar a verificar
+        x,y = result.shape
+        if x>0:
+            print("-- Total prod. sin proveedor encontrados:" ,x)
+            data = result[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+        
+    def verifyCatalogVentas(self):
+        df1 = self.AllProducts
+        df3 = self.categoryProducts
+        df3_filter = df3[df3["ProductCategoryHierarchyName"].str.contains("Catalogo Ventas",na=False)]
+        #print(df2)
+        result = df1[~df1["ItemNumber"].isin(df3_filter["ProductNumber"])]
+        #print(result)
+        x,y = result.shape
+        if x>0:
+            print("-- Total prod. sin catalogo encontrados:" ,x)
+            data = result[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+    
+    def verifyTranslationProduct1(self):
+        df1 = self.AllProducts
+        df2 = self.translationProducts
+        df_es = df2[df2["LanguageId"].str.contains("es",na=False)]
+        result1 = df1[~df1["ItemNumber"].isin(df_es["ProductNumber"])] # Solo los que tienen registrado el idioma MX
+        x1 ,y1 = result1.shape
+        
+        if x1>0:
+            print("-- Total prod. sin traducciones1 encontrados:" ,x1)
+            data = result1[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+    
+    def verifyTranslationProduct2(self):
+        df1 = self.AllProducts
+        df2 = self.translationProducts
+        df_mx = df2[df2["LanguageId"].str.contains("es-MX",na=False)]
+        result2 = df1[~df1["ItemNumber"].isin(df_mx["ProductNumber"])] # Solo los que tienen registrado el idioma ES
+        x2 ,y2 = result2.shape
+        if x2>0:
+            print("-- Total prod. sin traducciones2 encontrados:" ,x2)
+            data = result2[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+    
+    def verifyTranslationProduct3(self):
+        df1 = self.AllProducts
+        df2 = self.translationProducts
+        result3= df1[~df1["ItemNumber"].isin(df2["ProductNumber"])] # No esta registrado ni MX ni ES para el product
+        x3 ,y3 = result3.shape
+        if x3>0:
+            print("-- Total prod. sin traducciones3 encontrados:" ,x3)
+            data = result3[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+    
+    def verifyProductsInStateActive(self):
+        df1 = self.AllProducts
+        df2 = self.listProductsSell
+        df3 = self.productsInactive
+        result = df2[~df2["ItemId"].isin(df1["ItemNumber"])]
+        result_1 = df3[df3["ItemNumber"].isin(result["ItemId"])]
+        x , y = result.shape
+        if x>0:
+            print("-- Total prod. vendidos con estado activo encontrados:" ,x)
+            data = result_1[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+    ######
+    
+    #region AllProducts
+    def getAllProducts(self):
         #Definir url
-        path = f"{self.url}/data/TRURetailEodTransactions"
+        path = f"{self.url}/data/ReleasedProductsV2"
         
         token = self.get_Token()
         
         #Queries
-        query = f"?$filter=StatementId eq '{self.extracto}' and PostingErrorCode eq Microsoft.Dynamics.DataEntities.RetailEodTransactionPostingErrorCode'Error' &$select=TransactionId"
+        query = f"?$count=true&$filter=ProductLifecycleStateId eq 'ACTIVO' &$select=ItemNumber,ItemModelGroupId,ProductSubType,InventoryUnitSymbol,ProductLifecycleStateId,PurchaseUnitSymbol,ProductGroupId,DPCodProductSUNAT_PE,SearchName"
         
         #Headers
-        
         headers = {
             "Authorization": token,
             "Content-Type": "application/json"
@@ -104,85 +235,31 @@ class ApiDynamics:
         
         path=path+query
         response = requests.get(path,headers=headers)
-        resultList = {}
         if response.status_code == 200:
-            resultList[self.extracto] = {}
-            for i in response.json()["value"]:
-                resultList[self.extracto][i["TransactionId"]]={}
-                ##
-                self.transaccion=i["TransactionId"]
-                temp_list = self.get_Products_List()["value"]
-                for y in temp_list:
-                    print("Obteniendo resultados...")
-                    resultList[self.extracto][i["TransactionId"]][y["ItemId"]] = self.get_Unidad_Venta_Final(y["ItemId"],y["Unit"])
-                    ##
-                    if y["ItemId"] not in self.lista_productos:
-                        self.lista_productos[y["ItemId"] ]= self.get_Unidad_Venta_Final(y["ItemId"],y["Unit"])
-                        if self.productos == "":
-                            self.productos = self.productos+ y["ItemId"]
-                        else:
-                            self.productos = self.productos + "," + y["ItemId"]
-            return resultList
-        else:
-            return resultList
+            temp1= response.json()
+            #
+            count = int(int(temp1["@odata.count"])/10000)
+            if count > 0 :
+                result= temp1["value"]
+                for i in range(count):
+                    query_update = f"{path}&$top=10000&$skip={int(i)+1}0000"
+                    response = requests.get(query_update,headers=headers)
+                    if response.status_code == 200:
+                        result.extend(response.json()["value"])
+                return result
+            else:
+                return temp1["value"]
     #endregion
     
-    #region ObtenerUnidadVenta por Producto
-    def get_Unidad_Venta_Final(self,product,unidad_venta_final,grupo_tiendas=1):
-        
-        # Asignamos grupo de tiendas elegidas
-        tiendas_seleccionadas =[]
-        tiendas_minoristas = ["MD01_LUZ","MD02_JRC","MD03_CRH","MD04_SUC","MD05_CRZ","MD06_BOL","MD07_CEN"]
-        tiendas_mayoristas = ["AD01_RAY","AD02_CRH","AD03_CRZ","AD04_TCE"]
-        if grupo_tiendas == 1:
-            tiendas_seleccionadas = tiendas_minoristas
-        elif grupo_tiendas == 2:
-            tiendas_seleccionadas = tiendas_mayoristas
-        elif grupo_tiendas == 3:
-            tiendas_seleccionadas = tiendas_minoristas.extend(tiendas_mayoristas)
-            
-        ## Verificamos Unidades de Conversion
-        if self.verificar_Unidades_Conversion(product,unidad_venta_final):
-            #Definir url
-            path = f"{self.url}/data/SalesPriceAgreements"
-            
-            token = self.get_Token()
-            
-            #Queries
-            query = f"?$filter=ItemNumber eq '{product}' &$select=PriceWarehouseId"
-            
-            #Headers
-            headers = {
-                "Authorization": token,
-                "Content-Type": "application/json"
-            }
-            
-            path=path+query
-            response = requests.get(path,headers=headers)
-            result_list ={}
-            if response.status_code == 200:
-                for item in response.json()["value"]:
-                    if item["PriceWarehouseId"] in tiendas_seleccionadas:
-                        if unidad_venta_final in result_list:
-                            result_list[unidad_venta_final].append(item["PriceWarehouseId"])
-                        else:
-                            result_list[unidad_venta_final]=[]
-                            result_list[unidad_venta_final].append(item["PriceWarehouseId"])
-                return result_list
-            else:
-                return result_list
-        else:
-            return result_list
-    #endregion
-    #region ObtenerUnidadConversion por Producto
-    def verificar_Unidades_Conversion(self,product,unidad_venta):
+    #region AllProductsInactive
+    def getAllProductsInactive(self):
         #Definir url
-        path = f"{self.url}/data/ProductUnitOfMeasureConversions"
+        path = f"{self.url}/data/ReleasedProductsV2"
         
         token = self.get_Token()
         
         #Queries
-        query = f"?$filter=ProductNumber eq '{product}' &$select=FromUnitSymbol,ToUnitSymbol"
+        query = f"?$count=true&$filter=ProductLifecycleStateId eq 'INACTIVO' &$select=ItemNumber,SearchName"
         
         #Headers
         headers = {
@@ -192,41 +269,158 @@ class ApiDynamics:
         
         path=path+query
         response = requests.get(path,headers=headers)
-        count_errors=0
-        self.msg_error=""
-        temp_unidad_existe=0
         if response.status_code == 200:
-            for unit in response.json()["value"]:
-               ##Verificando configuración correcta entre unidades
-                if unit["FromUnitSymbol"] == unit["ToUnitSymbol"]:
-                   count_errors = count_errors +1
-                
-                ## Verificando configuracion correcta en unidad de venta
-                if unit["FromUnitSymbol"] == "U.":
-                    count_errors = count_errors + 1
-                
-                ## Verificando configuracion correcta en unidad de venta
-                if unit["FromUnitSymbol"] == unidad_venta:
-                    temp_unidad_existe = temp_unidad_existe+  1
-                    
-                
-            if temp_unidad_existe == 0:
-                count_errors = count_errors + 1
-                    
-            if count_errors > 0:
-                self.msg_error=self.msg_error + f"\n ERROR: En configuración de Unidades del producto {product} - VERIFICAR"
-                return False
+            temp1= response.json()
+            #
+            count = int(int(temp1["@odata.count"])/10000)
+            if count > 0 :
+                result= temp1["value"]
+                for i in range(count):
+                    query_update = f"{path}&$top=10000&$skip={int(i)+1}0000"
+                    response = requests.get(query_update,headers=headers)
+                    if response.status_code == 200:
+                        result.extend(response.json()["value"])
+                return result
             else:
-                return True
-        else:
-            return False
+                return temp1["value"]
     #endregion
     
-    def _getListaProductos(self):
-        return self.lista_productos
+    #region GetBarcode
+    def getBarcodeProduct(self):
+        #Definir url
+        path = f"{self.url}/data/ProductBarcodesV2"
+        
+        token = self.get_Token()
+        
+        #Queries
+        query = f"?$count=true&$select=ItemNumber,ProductQuantityUnitSymbol,BarcodeSetupId,Barcode,ProductDescription"
+        
+        #Headers
+        
+        headers = {
+            "Authorization": token,
+            "Content-Type": "application/json"
+        }
+        
+        path=path+query
+        response = requests.get(path,headers=headers)
+        if response.status_code == 200:
+            temp1= response.json()
+            #
+            count = int(int(temp1["@odata.count"])/10000)
+            if count > 0 :
+                result= temp1["value"]
+                for i in range(count):
+                    query_update = f"{path}&$top=10000&$skip={int(i)+1}0000"
+                    response = requests.get(query_update,headers=headers)
+                    if response.status_code == 200:
+                        result.extend(response.json()["value"])
+                return result
+            else:
+                return temp1["value"]
+    #endregion
     
-    def _getProductos(self):
-        return self.productos
+    #region GetCategoriesProduct
+    def getCategoryProduct(self):
+        #Definir url
+        path = f"{self.url}/data/ProductCategoryAssignments"
+        
+        token = self.get_Token()
+        
+        #Queries
+        query = f"?$count=true"
+        
+        #Headers
+        
+        headers = {
+            "Authorization": token,
+            "Content-Type": "application/json"
+        }
+        
+        path=path+query
+        response = requests.get(path,headers=headers)
+        if response.status_code == 200:
+            temp1= response.json()
+            #
+            count = int(int(temp1["@odata.count"])/10000)
+            if count > 0 :
+                result= temp1["value"]
+                for i in range(count):
+                    query_update = f"{path}&$top=10000&$skip={int(i)+1}0000"
+                    response = requests.get(query_update,headers=headers)
+                    if response.status_code == 200:
+                        result.extend(response.json()["value"])
+                return result
+            else:
+                return temp1["value"]
+    #endregion
     
-    def _getErrores(self):
-        return self.msg_error
+    #region GetCategoriesProduct
+    def getTraslationProduct(self):
+        #Definir url
+        path = f"{self.url}/data/ProductTranslations"
+        
+        token = self.get_Token()
+        
+        #Queries
+        query = f"?$count=true"
+        
+        #Headers
+        
+        headers = {
+            "Authorization": token,
+            "Content-Type": "application/json"
+        }
+        
+        path=path+query
+        response = requests.get(path,headers=headers)
+        if response.status_code == 200:
+            temp1= response.json()
+            #
+            count = int(int(temp1["@odata.count"])/10000)
+            if count > 0 :
+                result= temp1["value"]
+                for i in range(count):
+                    query_update = f"{path}&$top=10000&$skip={int(i)+1}0000"
+                    response = requests.get(query_update,headers=headers)
+                    if response.status_code == 200:
+                        result.extend(response.json()["value"])
+                return result
+            else:
+                return temp1["value"]
+    #endregion
+    
+    #region GetCategoriesProduct
+    def getListProvidersProducts(self):
+        #Definir url
+        path = f"{self.url}/data/ProductApprovedVendors"
+        
+        token = self.get_Token()
+        
+        #Queries
+        query = f"?$count=true"
+        
+        #Headers
+        
+        headers = {
+            "Authorization": token,
+            "Content-Type": "application/json"
+        }
+        
+        path=path+query
+        response = requests.get(path,headers=headers)
+        if response.status_code == 200:
+            temp1= response.json()
+            #
+            count = int(int(temp1["@odata.count"])/10000)
+            if count > 0 :
+                result= temp1["value"]
+                for i in range(count):
+                    query_update = f"{path}&$top=10000&$skip={int(i)+1}0000"
+                    response = requests.get(query_update,headers=headers)
+                    if response.status_code == 200:
+                        result.extend(response.json()["value"])
+                return result
+            else:
+                return temp1["value"]
+    #endregion
