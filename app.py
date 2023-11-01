@@ -22,3 +22,7 @@ def main():
 
 if __name__=='__main__':
     main()
+# from functions.api_dynamics import ApiDynamics
+
+# api = ApiDynamics()
+# api.verifyEquiUnitSymbol()

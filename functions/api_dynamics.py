@@ -1,6 +1,7 @@
 import requests, json
 import datetime
 import pandas as pd
+import re
 
 class ApiDynamics:
     
@@ -20,6 +21,7 @@ class ApiDynamics:
     listProviders = None
     listProductsSell = None
     productsInactive = None
+    unitConvertionProducts = None
     
     #Inicializando 
     def __init__(self):
@@ -32,6 +34,7 @@ class ApiDynamics:
         self.listProviders = pd.read_json(json.dumps(self.getListProvidersProducts()))
         self.listProductsSell = pd.read_json(json.dumps(self.getProductsSell()))
         self.productsInactive = pd.read_json(json.dumps(self.getAllProductsInactive()))
+        self.unitConvertionProducts = pd.read_json(json.dumps(self.getUnitConversionProducts()))
         ##
     
     def get_Token(self):
@@ -118,6 +121,26 @@ class ApiDynamics:
         if x>0:
             print("-- Total prod. con problemas en unidades de conversion encontrado:" ,x)
             data = inventory_filter_symbol[["ItemNumber","SearchName"]] 
+            return data
+        else: 
+            return pd.DataFrame({})
+        
+    def verifyEquiUnitSymbol(self):
+        df1 = self.unitConvertionProducts
+        df2 = self.AllProducts
+        df1["from_u"] = df1["FromUnitSymbol"].apply(lambda x: re.findall(r'\d+',x))
+        df1["from_u"] = df1["from_u"].apply(lambda x: int(x[0]) if len(x) > 0 else 1)
+        df1["to_u"] = df1["ToUnitSymbol"].apply(lambda x: re.findall(r'\d+',x))
+        df1["to_u"] = df1["to_u"].apply(lambda x: int(x[0]) if len(x) > 0 else 1)
+        #temp_result = df1[~(df1["to_u"].astype(int) * df1["Factor"].astype(int) == df1["from_u"].astype(int))]
+        temp_result = df1[~(df1["to_u"].astype(float) * df1["Factor"].astype(float) == df1["from_u"].astype(float))]
+        result = pd.merge(df2,temp_result,left_on='ItemNumber',right_on='ProductNumber')
+        result["error"] = result["ToUnitSymbol"].astype(str) +' / '+ result["Factor"].astype(str) +' / '+ result["FromUnitSymbol"].astype(str)
+        x , y = result.shape
+        
+        if x>0:
+            print("-- Total prod. con problemas en unidades de conversion encontrado:" ,x)
+            data = result[["ItemNumber","SearchName","error"]] 
             return data
         else: 
             return pd.DataFrame({})
@@ -394,6 +417,41 @@ class ApiDynamics:
     def getListProvidersProducts(self):
         #Definir url
         path = f"{self.url}/data/ProductApprovedVendors"
+        
+        token = self.get_Token()
+        
+        #Queries
+        query = f"?$count=true"
+        
+        #Headers
+        
+        headers = {
+            "Authorization": token,
+            "Content-Type": "application/json"
+        }
+        
+        path=path+query
+        response = requests.get(path,headers=headers)
+        if response.status_code == 200:
+            temp1= response.json()
+            #
+            count = int(int(temp1["@odata.count"])/10000)
+            if count > 0 :
+                result= temp1["value"]
+                for i in range(count):
+                    query_update = f"{path}&$top=10000&$skip={int(i)+1}0000"
+                    response = requests.get(query_update,headers=headers)
+                    if response.status_code == 200:
+                        result.extend(response.json()["value"])
+                return result
+            else:
+                return temp1["value"]
+    #endregion
+    
+    #region GetUnitConvertionProducts
+    def getUnitConversionProducts(self):
+        #Definir url
+        path = f"{self.url}/data/ProductSpecificUnitOfMeasureConversions"
         
         token = self.get_Token()
         

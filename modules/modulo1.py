@@ -22,6 +22,7 @@ class Modulo1:
         ##
         bar_code = pd.DataFrame({})
         unit = pd.DataFrame({})
+        unit_eq = pd.DataFrame({})
         sunat = pd.DataFrame({})
         provider = pd.DataFrame({})
         catalogo = pd.DataFrame({})
@@ -44,6 +45,13 @@ class Modulo1:
             unit = self.api.verifyUnitSymbol()
         except:
             print("ERROR: Ocurrió un error al momento de verificar la unidades de conversion")
+        
+        ## Verificando unidades de conversion - equivalencias
+        print("-- Verificando codigo unidades de conversión")
+        try:
+            unit_eq = self.api.verifyEquiUnitSymbol()
+        except:
+            print("ERROR: Ocurrió un error al momento de verificar la unidades de conversion - equivalencias")
         
         ## Verificando codigo sunat
         print("-- Verificando codigo SUNAT")
@@ -122,6 +130,25 @@ class Modulo1:
                     count_c = 0
                     for c_i, value in enumerate(row,1):
                         sheet[f'{colum_l[count_c]}{num_row}'] = str(value)
+                        count_c = count_c+1
+                    count_f = count_f+1 
+        ####
+        ####
+        if unit_eq.empty != True:
+            ##
+            tipo_verificacion.append("UNIT")
+            ##
+            rows = dataframe_to_rows(unit_eq,index=False)
+            for r_i, row in enumerate(rows,1):
+                if r_i != 1:
+                    num_row = seed_cell_excel + count_f
+                    sheet[f'B{num_row}'] = count_f+1
+                    count_c = 0
+                    for c_i, value in enumerate(row,1):
+                        if count_c ==2:
+                            sheet[f'C{num_row}'] = f"ERROR EN UNIDADES DE CONVERSIÓN - {str(value)}"
+                        else:
+                            sheet[f'{colum_l[count_c]}{num_row}'] = str(value)
                         count_c = count_c+1
                     count_f = count_f+1 
         ####
