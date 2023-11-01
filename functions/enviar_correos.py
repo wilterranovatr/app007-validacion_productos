@@ -128,8 +128,7 @@ class EnviarCorreos:
         file_name = filename.split("/")[-1]
         file_attachment.add_header(
             "Content-Disposition",
-            f"attachment
-        filename= {file_name}",
+            f"attachment; filename= {file_name}",
         )
         # Agregamos el archivo en el mensaje
         email_message.attach(file_attachment)
