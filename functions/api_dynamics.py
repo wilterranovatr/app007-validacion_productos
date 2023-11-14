@@ -247,8 +247,8 @@ class ApiDynamics:
     def verifyPricesExists(self):
         df1 = self.priceProducts
         df2 = self.AllProducts
-        result = df1[df1["Price"].isnull()]
-        #print(result)
+        result = df1[(df1['Price'] == 0) | (df1['Price'] == '')]
+        print(result)
         result_1 = pd.merge(df2,result,left_on='ItemNumber',right_on='ItemNumber')
         result_1["error"] = result_1["PriceWarehouseId"] + " | "+ result_1["QuantityUnitySymbol"]
         x , y = result_1.shape
@@ -268,7 +268,7 @@ class ApiDynamics:
         token = self.get_Token()
         
         #Queries
-        query = f"?$count=true&$select=ItemNumber,PriceWarehouseId,QuantityUnitySymbol,Price&$filter=PriceWarehouseId eq 'MD01_LUZ' or PriceWarehouseId eq 'MD02_JRC' or PriceWarehouseId eq 'MD03_CRH' or PriceWarehouseId eq 'MD04_SUC' or PriceWarehouseId eq 'MD05_CRZ' or PriceWarehouseId eq 'MD06_BOL' or PriceWarehouseId eq 'MD07_CEN'"
+        query = f"?$count=true&$select=ItemNumber,PriceWarehouseId,QuantityUnitySymbol,Price"
         
         #Headers
         headers = {
