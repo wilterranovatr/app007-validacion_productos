@@ -25,4 +25,4 @@ if __name__=='__main__':
 # from functions.api_dynamics import ApiDynamics
 
 # api = ApiDynamics()
-# api.verifyEquiUnitSymbol()
+# api.verifyPricesExists()

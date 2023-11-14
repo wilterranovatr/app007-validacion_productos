@@ -72,6 +72,12 @@ class EnviarCorreos:
             <p>Se encontraron productos afectados los cuales se muestran en el archivo adjunto.
             </p>
         </div>'''
+        if "PRICE" in self.tipo_ver:
+            msg_contenido = msg_contenido+'''<div style="margin-left: 14px;">
+            <h3>Productos sin asignación de precios</h3>
+            <p>Se encontraron productos afectados los cuales se muestran en el archivo adjunto.
+            </p>
+        </div>'''
         if "STATUS_ACTIVE" in self.tipo_ver:
             msg_contenido = msg_contenido+'''<div style="margin-left: 14px;">
             <h3>Productos vendidos con estado INACTIVO</h3>

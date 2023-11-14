@@ -22,7 +22,11 @@ class ApiDynamics:
     listProductsSell = None
     productsInactive = None
     unitConvertionProducts = None
+    priceProducts = None
     
+    ##
+    names_markets = ['MD01_LUZ','MD02_JRC','MD03_CRH','MD04_SUC','MD05_CRZ','MD06_BOL','MD07_CEN']
+
     #Inicializando 
     def __init__(self):
         
@@ -35,6 +39,7 @@ class ApiDynamics:
         self.listProductsSell = pd.read_json(json.dumps(self.getProductsSell()))
         self.productsInactive = pd.read_json(json.dumps(self.getAllProductsInactive()))
         self.unitConvertionProducts = pd.read_json(json.dumps(self.getUnitConversionProducts()))
+        self.priceProducts = pd.read_json(json.dumps(self.getPricesProducts()))
         ##
     
     def get_Token(self):
@@ -238,8 +243,57 @@ class ApiDynamics:
             return data
         else: 
             return pd.DataFrame({})
+        
+    def verifyPricesExists(self):
+        df1 = self.priceProducts
+        df2 = self.AllProducts
+        result = df1[df1["Price"].isnull()]
+        #print(result)
+        result_1 = pd.merge(df2,result,left_on='ItemNumber',right_on='ItemNumber')
+        result_1["error"] = result_1["PriceWarehouseId"] + " | "+ result_1["QuantityUnitySymbol"]
+        x , y = result_1.shape
+        if x>0:
+            print("-- Total prod. vendidos con estado activo encontrados:" ,x)
+            data = result_1[["ItemNumber","SearchName","error"]]
+            return data
+        else: 
+            return pd.DataFrame({})
     ######
     
+    #region PricesProducts
+    def getPricesProducts(self):
+        #Definir url
+        path = f"{self.url}/data/SalesPriceAgreements"
+        
+        token = self.get_Token()
+        
+        #Queries
+        query = f"?$count=true&$select=ItemNumber,PriceWarehouseId,QuantityUnitySymbol,Price&$filter=PriceWarehouseId eq 'MD01_LUZ' or PriceWarehouseId eq 'MD02_JRC' or PriceWarehouseId eq 'MD03_CRH' or PriceWarehouseId eq 'MD04_SUC' or PriceWarehouseId eq 'MD05_CRZ' or PriceWarehouseId eq 'MD06_BOL' or PriceWarehouseId eq 'MD07_CEN'"
+        
+        #Headers
+        headers = {
+            "Authorization": token,
+            "Content-Type": "application/json"
+        }
+        
+        path=path+query
+        response = requests.get(path,headers=headers)
+        if response.status_code == 200:
+            temp1= response.json()
+            #
+            count = int(int(temp1["@odata.count"])/10000)
+            if count > 0 :
+                result= temp1["value"]
+                for i in range(count):
+                    query_update = f"{path}&$top=10000&$skip={int(i)+1}0000"
+                    response = requests.get(query_update,headers=headers)
+                    if response.status_code == 200:
+                        result.extend(response.json()["value"])
+                return result
+            else:
+                return temp1["value"]
+    #endregion
+
     #region AllProducts
     def getAllProducts(self):
         #Definir url
